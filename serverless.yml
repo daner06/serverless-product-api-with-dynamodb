@@ -1,0 +1,79 @@
+service: aws-nodejs-typescript
+
+frameworkVersion: "3"
+
+provider:
+  name: aws
+  runtime: nodejs20.x
+  region: eu-west-2
+
+  iam:
+    role:
+      statements:
+        - Effect: "Allow"
+          Action:
+            - "dynamodb:PutItem"
+            - "dynamodb:GetItem"
+            - "dynamodb:Scan"
+            - "dynamodb:DeleteItem"
+          Resource:
+            - "Fn::GetAtt": [ "ProductsTable", "Arn" ]
+  environment:
+    PRODUCTS_TABLE: !Ref ProductsTable
+
+functions:
+  createProduct:
+    handler: src/handlers.createProduct
+    events:
+      - httpApi:
+          path: /product
+          method: post
+  getProduct:
+    handler: src/handlers.getProduct
+    events:
+      - httpApi:
+          path: /product/{id}
+          method: get
+  updateProduct:
+    handler: src/handlers.updateProduct
+    events:
+      - httpApi:
+          path: /product/{id}
+          method: put
+  deleteProduct:
+    handler: src/handlers.deleteProduct
+    events:
+      - httpApi:
+          path: /product/{id}
+          method: delete
+  listProducts:
+    handler: src/handlers.listProducts
+    events:
+      - httpApi:
+          path: /product
+          method: get
+
+plugins:
+  - serverless-esbuild
+
+custom:
+  esbuild:
+    bundle: true
+    target: node20
+    platform: node
+
+resources:
+  Resources:
+    ProductsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: Products
+        ProvisionedThroughput:
+          ReadCapacityUnits: 1
+          WriteCapacityUnits: 1
+        AttributeDefinitions:
+          - AttributeName: productID
+            AttributeType: S
+        KeySchema:
+          - AttributeName: productID
+            KeyType: HASH
