@@ -1,50 +1,14 @@
-import { DynamoDBClient, ScanCommand } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, PutCommand, GetCommand, DeleteCommand } from "@aws-sdk/lib-dynamodb";
+import { ScanCommand } from "@aws-sdk/client-dynamodb";
+import { DeleteCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
 import { v4 } from "uuid";
-
-const client = new DynamoDBClient({});
-const docClient = DynamoDBDocumentClient.from(client);
-const tableName = process.env.PRODUCTS_TABLE ?? "Products";
-const headers = {
-  "Content-Type": "application/json",
-};
-
-class HttpError extends Error {
-  constructor(public statusCode: number, body: Record<string, unknown>) {
-    super(JSON.stringify(body));
-  }
-}
-
-const handleError = (error: unknown) => {
-  if (error instanceof HttpError) {
-    return {
-      statusCode: error.statusCode,
-      body: JSON.stringify(error.message),
-      headers,
-    };
-  }
-  throw error;
-};
-
-const fetchProductById = async (id: string) => {
-  const output = await docClient.send(
-    new GetCommand({
-      TableName: tableName,
-      Key: { productID: id },
-    }),
-  );
-
-  if (!output.Item) {
-    throw new HttpError(404, { error: "not found" });
-  }
-
-  return output.Item;
-};
+import { docClient, fetchProductById, tableName } from "./db";
+import { handleError, headers } from "./http";
+import { productSchema } from "./schemas";
 
 export const createProduct = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
   try {
-    const reqBody = JSON.parse(event.body as string);
+    const reqBody = productSchema.parse(JSON.parse(event.body ?? ""));
 
     const product = {
       ...reqBody,
@@ -87,7 +51,7 @@ export const updateProduct = async (event: APIGatewayProxyEvent): Promise<APIGat
     const id = event.pathParameters?.id as string;
     await fetchProductById(id);
 
-    const reqBody = JSON.parse(event.body as string);
+    const reqBody = productSchema.parse(JSON.parse(event.body ?? ""));
 
     const product = {
       ...reqBody,
@@ -124,16 +88,16 @@ export const deleteProduct = async (event: APIGatewayProxyEvent): Promise<APIGat
     );
 
     return {
-      statusCode: 204,
+      statusCode: 200,
       headers,
-      body: JSON.stringify({ message: "product deleted successfully" }),
+      body: JSON.stringify({ message: `product ${id} deleted successfully` }),
     };
   } catch (error) {
     return handleError(error);
   }
 };
 
-export const listProducts = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
+export const listProducts = async (_event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
   try {
     const products = await docClient.send(
       new ScanCommand({
@@ -141,10 +105,25 @@ export const listProducts = async (event: APIGatewayProxyEvent): Promise<APIGate
       }),
     );
 
+    if (!products.Items || products.Items.length === 0) {
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify([]),
+      };
+    }
+
+    // For small datasets (like this demo project),
+    // it is a good in-memory sorting solution
+    // But for bigger datasets use Global Secondary Index (GSI) instead.
+    const sorted = products.Items.sort((a, b) =>
+      String(a.name ?? "").localeCompare(String(b.name ?? "")),
+    );
+
     return {
       statusCode: 200,
       headers,
-      body: JSON.stringify(products.Items),
+      body: JSON.stringify(sorted),
     };
   } catch (error) {
     return handleError(error);
